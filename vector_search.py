@@ -38,9 +38,7 @@ async def search(request: Request):
     query = data.get("question")
     top_k = data.get("top_k", 3)
     
-    print(f"Searching for: {query}")
     embedding = get_embedding(query)
-    print(f"Embedding generated, size: {len(embedding)}")
 
     redis_query = f'*=>[KNN {top_k} @embedding $vector AS score]'
     
@@ -57,35 +55,43 @@ async def search(request: Request):
         )
         
         # Parse results
-        print(f"Raw result from Redis: {result[:100]}")  # Debug: print first 100 chars
         results = []
         
         # Check if we have results
-        if isinstance(result, list) and len(result) > 1:
+        if isinstance(result, list) and len(result) > 0:
             # First element is the count
             count = result[0]
-            print(f"Found {count} results")
             
-            # Parse each result
-            for i in range(1, len(result), 2):
-                if i < len(result):
-                    doc_data = result[i]
+            # Parse each result (doc_id at odd indices, fields at even indices after first)
+            i = 1
+            while i < len(result):
+                if i+1 < len(result):
+                    doc_id = result[i]
+                    doc_fields = result[i+1]
+                    
                     text_value = None
                     score_value = None
                     
-                    for j in range(0, len(doc_data), 2):
-                        if doc_data[j] == b'text':
-                            text_value = doc_data[j+1].decode('utf-8') if isinstance(doc_data[j+1], bytes) else doc_data[j+1]
-                        elif doc_data[j] == b'score':
-                            score_value = float(doc_data[j+1])
+                    # Parse the fields array
+                    for j in range(0, len(doc_fields), 2):
+                        if j+1 < len(doc_fields):
+                            field_name = doc_fields[j]
+                            field_value = doc_fields[j+1]
+                            
+                            if field_name == b'text':
+                                text_value = field_value.decode('utf-8', errors='ignore') if isinstance(field_value, bytes) else field_value
+                            elif field_name == b'score':
+                                score_value = float(field_value) if isinstance(field_value, bytes) else field_value
                     
                     if text_value:
                         results.append({
                             'text': text_value,
                             'score': score_value or 0
                         })
+                
+                i += 2  # Move to next doc_id/fields pair
         
-        return {"results": results, "debug_count": len(results)}
+        return {"results": results}
     
     except Exception as e:
         return {"error": str(e), "results": []}
