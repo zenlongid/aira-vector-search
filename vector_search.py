@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 import redis
 import openai
 import numpy as np
@@ -37,8 +37,10 @@ async def search(request: Request):
     data = await request.json()
     query = data.get("question")
     top_k = data.get("top_k", 3)
-
+    
+    print(f"Searching for: {query}")
     embedding = get_embedding(query)
+    print(f"Embedding generated, size: {len(embedding)}")
 
     redis_query = f'*=>[KNN {top_k} @embedding $vector AS score]'
     
@@ -78,3 +80,26 @@ async def search(request: Request):
     
     except Exception as e:
         return {"error": str(e), "results": []}
+
+@app.get("/health")
+async def health():
+    try:
+        # Test Redis connection
+        r.ping()
+        
+        # Check index info
+        info = r.execute_command('FT.INFO', 'kb_index')
+        num_docs = 0
+        for i, val in enumerate(info):
+            if val == b'num_docs':
+                num_docs = int(info[i+1])
+                break
+        
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "index": "kb_index",
+            "documents": num_docs
+        }
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
